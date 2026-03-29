@@ -1,0 +1,35 @@
+# Виртуальное окружение
+.venv/
+venv/
+env/
+
+# Кэш и артефакты Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Локальные настройки и секреты (поверх config/settings.json)
+config/settings.local.json
+.env
+.env.*
+
+# IDE и ОС
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Логи и временные файлы
+*.log
+.cache/
