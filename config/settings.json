@@ -1,0 +1,59 @@
+{
+  "llm": {
+    "base_url": "https://vllm.ru.tuna.am/v1",
+    "api_key": "",
+    "api_key_env": "OPENAI_API_KEY",
+    "model": "Qwen/Qwen3.5-9B"
+  },
+  "generation": {
+    "temperature": 0.5,
+    "max_tokens": 10000,
+    "top_k": 20,
+    "enable_thinking": false
+  },
+  "prompts": {
+    "system_file": "prompts/system.txt",
+    "user_intro_file": "prompts/user_intro.txt"
+  },
+  "summarization": {
+    "models": {
+      "generator_1": "Qwen/Qwen3.5-9B",
+      "generator_2": "Qwen/Qwen3.5-9B",
+      "aggregator": "Qwen/Qwen3.5-9B",
+      "validator": "Qwen/Qwen3.5-9B"
+    },
+    "temperatures": {
+      "generator_1": 0.5,
+      "generator_2": 0.5,
+      "aggregator": 0.6,
+      "validator": 0.1
+    },
+    "generation": {
+      "max_tokens": 10000,
+      "top_k": 20,
+      "enable_thinking": false
+    },
+    "prompt_files": {
+      "generator_1_system": "prompts/summarization/generator_1_system.txt",
+      "generator_2_system": "prompts/summarization/generator_2_system.txt"
+    },
+    "user_templates": {
+      "generator_1": "Суммаризируй медицинский текст:\n\n{text}",
+      "generator_2": "Проанализируй медицинскую карту:\n\n{text}"
+    },
+    "validation": {
+      "required_fields": [
+        "пациент",
+        "жалобы",
+        "анамнез_заболевания",
+        "анамнез_жизни",
+        "лабораторные_данные",
+        "инструментальные_данные",
+        "цель_исследования",
+        "источники"
+      ],
+      "validation_threshold": 0.7,
+      "min_field_length": 10
+    }
+  }
+}

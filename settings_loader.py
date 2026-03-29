@@ -30,12 +30,66 @@ class PromptPaths:
 
 
 @dataclass(frozen=True)
+class SummarizationModels:
+    generator_1: str
+    generator_2: str
+    aggregator: str
+    validator: str
+
+
+@dataclass(frozen=True)
+class SummarizationTemperatures:
+    generator_1: float
+    generator_2: float
+    aggregator: float
+    validator: float
+
+
+@dataclass(frozen=True)
+class SummarizationPromptFiles:
+    generator_1_system: str
+    generator_2_system: str
+
+
+@dataclass(frozen=True)
+class SummarizationValidation:
+    required_fields: tuple[str, ...]
+    validation_threshold: float
+    min_field_length: int
+
+
+@dataclass(frozen=True)
+class SummarizationGeneration:
+    """Общие параметры вызова LLM в пайплайне (температуры — в SummarizationTemperatures)."""
+
+    max_tokens: int
+    top_k: int
+    enable_thinking: bool
+
+
+@dataclass(frozen=True)
+class SummarizationSettings:
+    """Настройки двух генераторов, агрегации и валидации (модели из конфига)."""
+
+    models: SummarizationModels
+    temperatures: SummarizationTemperatures
+    generation: SummarizationGeneration
+    prompt_files: SummarizationPromptFiles
+    system_prompt_generator_1: str
+    system_prompt_generator_2: str
+    user_template_generator_1: str
+    user_template_generator_2: str
+    validation: SummarizationValidation
+
+
+@dataclass(frozen=True)
 class AppSettings:
     llm: LLMSettings
     generation: GenerationSettings
     prompts: PromptPaths
     system_prompt: str
     user_intro: str
+    summarization: SummarizationSettings
 
 
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
@@ -99,10 +153,79 @@ def load_app_settings() -> AppSettings:
         user_intro_file=user_rel,
     )
 
+    sum_raw = raw.get("summarization") or {}
+    sum_models = sum_raw.get("models", {})
+    sum_temps = sum_raw.get("temperatures", {})
+    sum_gen = sum_raw.get("generation", {})
+    sum_pf = sum_raw.get("prompt_files", {})
+    sum_ut = sum_raw.get("user_templates", {})
+    sum_val = sum_raw.get("validation", {})
+
+    g1_rel = sum_pf.get(
+        "generator_1_system", "prompts/summarization/generator_1_system.txt"
+    )
+    g2_rel = sum_pf.get(
+        "generator_2_system", "prompts/summarization/generator_2_system.txt"
+    )
+    g1_path = ROOT_DIR / g1_rel
+    g2_path = ROOT_DIR / g2_rel
+
+    summarization = SummarizationSettings(
+        models=SummarizationModels(
+            generator_1=str(sum_models.get("generator_1", llm.model)).strip(),
+            generator_2=str(sum_models.get("generator_2", llm.model)).strip(),
+            aggregator=str(sum_models.get("aggregator", llm.model)).strip(),
+            validator=str(sum_models.get("validator", llm.model)).strip(),
+        ),
+        temperatures=SummarizationTemperatures(
+            generator_1=float(sum_temps.get("generator_1", 0.5)),
+            generator_2=float(sum_temps.get("generator_2", 0.5)),
+            aggregator=float(sum_temps.get("aggregator", 0.6)),
+            validator=float(sum_temps.get("validator", 0.1)),
+        ),
+        generation=SummarizationGeneration(
+            max_tokens=int(sum_gen.get("max_tokens", generation.max_tokens)),
+            top_k=int(sum_gen.get("top_k", generation.top_k)),
+            enable_thinking=bool(
+                sum_gen.get("enable_thinking", generation.enable_thinking)
+            ),
+        ),
+        prompt_files=SummarizationPromptFiles(
+            generator_1_system=g1_rel,
+            generator_2_system=g2_rel,
+        ),
+        system_prompt_generator_1=g1_path.read_text(encoding="utf-8").strip(),
+        system_prompt_generator_2=g2_path.read_text(encoding="utf-8").strip(),
+        user_template_generator_1=str(
+            sum_ut.get("generator_1", "Суммаризируй медицинский текст:\n\n{text}")
+        ),
+        user_template_generator_2=str(
+            sum_ut.get("generator_2", "Проанализируй медицинскую карту:\n\n{text}")
+        ),
+        validation=SummarizationValidation(
+            required_fields=tuple(
+                sum_val.get("required_fields")
+                or (
+                    "пациент",
+                    "жалобы",
+                    "анамнез_заболевания",
+                    "анамнез_жизни",
+                    "лабораторные_данные",
+                    "инструментальные_данные",
+                    "цель_исследования",
+                    "источники",
+                )
+            ),
+            validation_threshold=float(sum_val.get("validation_threshold", 0.7)),
+            min_field_length=int(sum_val.get("min_field_length", 10)),
+        ),
+    )
+
     return AppSettings(
         llm=llm,
         generation=generation,
         prompts=prompts,
         system_prompt=system_prompt,
         user_intro=user_intro,
+        summarization=summarization,
     )

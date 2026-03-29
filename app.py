@@ -1,7 +1,15 @@
+import pandas as pd
 import streamlit as st
 
-from llm_service import make_client, summarize_medical_text
+from llm_service import make_client
 from settings_loader import load_app_settings
+from summarization import (
+    aggregated_to_markdown,
+    aggregated_to_plain_text,
+    pick_sources_for_table,
+    run_summarization_pipeline,
+    sources_dict_to_rows,
+)
 
 
 @st.cache_resource
@@ -39,16 +47,15 @@ def main():
     st.markdown(
         """
         <div class="yulastar-desc">
-        Вставьте текст медицинской карты слева или загрузите <strong>.txt</strong> файл. Справа отобразится
-        структурированное резюме для врача-рентгенолога (КТ органов брюшной полости) —
-        жалобы, анамнез, сопутствующие данные, лаборатория и инструментальные методы.
+        Вставьте текст медицинской карты слева или загрузите <strong>.txt</strong> файл. Справа — итоговая
+        суммаризация в текстовом виде (разделы по полям JSON), таблица цитат и вспомогательные JSON-вкладки.
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    if "summary" not in st.session_state:
-        st.session_state.summary = ""
+    if "pipeline_result" not in st.session_state:
+        st.session_state.pipeline_result = None
     if "source_text" not in st.session_state:
         st.session_state.source_text = ""
     if "_upload_sig" not in st.session_state:
@@ -84,7 +91,7 @@ def main():
             "Суммаризировать",
             type="primary",
             use_container_width=True,
-            help="Отправить текст в модель и показать резюме справа",
+            help="Запустить пайплайн (2 модели → агрегация → валидация)",
         )
 
     source = (st.session_state.source_text or "").strip()
@@ -97,34 +104,86 @@ def main():
             st.warning("Добавьте текст или загрузите .txt файл.")
         else:
             with work_status:
-                with st.spinner("Модель формирует резюме…"):
+                with st.spinner("Пайплайн суммаризации (генераторы и валидация)…"):
                     try:
-                        st.session_state.summary = summarize_medical_text(
+                        st.session_state.pipeline_result = run_summarization_pipeline(
                             client, settings, source
                         )
                     except Exception as e:
-                        st.session_state.summary = ""
+                        st.session_state.pipeline_result = None
                         st.error(f"Ошибка при обращении к API: {e}")
 
-    summary_text = st.session_state.summary or ""
-    summary_bytes = summary_text.encode("utf-8-sig")
+    result = st.session_state.pipeline_result
 
     with right:
-        st.subheader("Суммаризация")
-        st.download_button(
-            label="Экспортировать (.txt)",
-            data=summary_bytes,
-            file_name="yulastar_summary.txt",
-            mime="text/plain",
-            use_container_width=True,
-            disabled=len(summary_text.strip()) == 0,
-            key="download_summary_txt",
-            help="Скачать текущее резюме в UTF-8 (с BOM для Блокнота Windows)",
-        )
-        if summary_text.strip():
-            st.markdown(summary_text)
+        st.subheader("Результат")
+        if result is None:
+            st.caption("Нажмите «Суммаризировать», чтобы запустить пайплайн.")
         else:
-            st.caption("Результат появится здесь после нажатия «Суммаризировать».")
+            errs = result.get("errors") or []
+            if errs:
+                st.error("Ошибки: " + "; ".join(errs))
+
+            agg = result.get("aggregated_result") or {}
+            summary_plain = aggregated_to_plain_text(agg if isinstance(agg, dict) else {})
+            summary_bytes = summary_plain.encode("utf-8-sig")
+            st.download_button(
+                label="Скачать суммаризацию (.txt)",
+                data=summary_bytes,
+                file_name="yulastar_summary.txt",
+                mime="text/plain; charset=utf-8",
+                use_container_width=True,
+                key="download_summary_txt",
+                disabled=len(summary_plain.strip()) == 0,
+            )
+
+            sources = pick_sources_for_table(result)
+            rows = sources_dict_to_rows(sources)
+
+            tab_summary, tab_citations, tab_agg, tab_g1, tab_g2, tab_val = st.tabs(
+                [
+                    "Итоговая суммаризация",
+                    "Таблица цитат",
+                    "Агрегат (JSON)",
+                    "Генератор 1",
+                    "Генератор 2",
+                    "Валидация",
+                ]
+            )
+
+            with tab_summary:
+                if summary_plain.strip():
+                    st.markdown(aggregated_to_markdown(agg if isinstance(agg, dict) else {}))
+                else:
+                    st.info(
+                        "Агрегированный результат пуст. Проверьте ответы моделей на вкладках генераторов."
+                    )
+
+            with tab_citations:
+                if rows:
+                    df = pd.DataFrame(rows)
+                    st.dataframe(df, use_container_width=True, hide_index=True)
+                else:
+                    st.info(
+                        "Блок «источники» пуст или отсутствует в ответе моделей. "
+                        "Смотрите сырые JSON на других вкладках."
+                    )
+
+            with tab_agg:
+                st.json(result.get("aggregated_result") or {})
+
+            with tab_g1:
+                st.json(result.get("generator_1_output") or {})
+
+            with tab_g2:
+                st.json(result.get("generator_2_output") or {})
+
+            with tab_val:
+                vr = result.get("validation_result") or {}
+                st.json(vr)
+                valid = result.get("is_valid")
+                if valid is not None:
+                    st.caption(f"Итог валидации: {'пройдено' if valid else 'не пройдено'}")
 
 
 if __name__ == "__main__":
